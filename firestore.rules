@@ -1,0 +1,49 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null && request.auth.token.email_verified == true; }
+    function mine(uid) { return signedIn() && request.auth.uid == uid; }
+    function isAdmin() { return signedIn() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'; }
+
+    match /users/{uid} {
+      allow read: if mine(uid) || isAdmin();
+      allow create: if mine(uid) && request.resource.data.keys().hasOnly(['em','ph','fn','ln','av','createdAt']);
+      // تعديل: المستخدم يغيّر هذه الحقول فقط (قائمة سماح بدل قائمة منع)
+      allow update: if isAdmin() || (mine(uid) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['em','ph','fn','ln','av','createdAt']));
+      allow delete: if isAdmin();
+    }
+    match /orders/{id} {
+      allow read: if isAdmin() || (signedIn() && resource.data.uid == request.auth.uid);
+      allow create: if isAdmin();
+      allow update: if isAdmin() || (mine(resource.data.uid) && resource.data.status == 'قيد المراجعة' && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']) && request.resource.data.status == 'ملغاة');
+      allow delete: if isAdmin();
+    }
+    match /deposits/{id} {
+      allow read: if isAdmin() || (signedIn() && resource.data.uid == request.auth.uid);
+      allow write: if isAdmin();
+    }
+    match /chatmsgs/{id} {
+      allow read: if isAdmin() || (signedIn() && resource.data.cid == request.auth.uid);
+      allow create: if isAdmin() || (mine(request.resource.data.cid) && request.resource.data.f == 'user');
+      allow update, delete: if isAdmin();
+    }
+    match /chats/{cid} {
+      allow read: if mine(cid) || isAdmin();
+      // تعديل: المستخدم لا يكتب إلا الحقول المعروفة
+      allow create, update: if isAdmin() || (mine(cid) && request.resource.data.keys().hasOnly(['cid','em','last','ts','un']));
+      allow delete: if isAdmin();
+    }
+    match /banner/{id} { allow read: if signedIn(); allow write: if isAdmin(); }
+    match /config/{id} { allow read: if signedIn(); allow write: if isAdmin(); }
+    match /verif/{uid} {
+      allow read: if mine(uid) || isAdmin();
+      allow create, update: if isAdmin() || (mine(uid) && request.resource.data.uid == request.auth.uid && request.resource.data.st == 'pending');
+      allow delete: if isAdmin();
+    }
+    match /verifimg/{id} {
+      allow read: if isAdmin();
+      allow create, update: if isAdmin() || (signedIn() && request.resource.data.uid == request.auth.uid && id.matches(request.auth.uid + '_[0-2]'));
+      allow delete: if isAdmin();
+    }
+  }
+}
